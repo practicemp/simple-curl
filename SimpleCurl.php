@@ -75,6 +75,9 @@ class SimpleCurl
 
 	public function multi(array $urls, callable $callable)
 	{
+        if (count($urls) == 0) {
+            echo '没有网址传入！', PHP_EOL;
+        }
 		$t1 = microtime(true);
 		foreach ($urls as $url) {
 			$ch = curl_init($url);
@@ -82,6 +85,7 @@ class SimpleCurl
 			curl_setopt($ch, CURLOPT_PRIVATE, $url);
 			$this->ch_pool[] = $ch;
 		}
+		unset($urls);
 		$this->mh = curl_multi_init();
 		curl_multi_setopt($this->mh, CURLMOPT_MAXCONNECTS, $this->maxThread);
 
@@ -108,7 +112,9 @@ class SimpleCurl
 			} while ($mrc == CURLM_CALL_MULTI_PERFORM);
 			while ($done = curl_multi_info_read($this->mh)) {
 				$doneCh = $done['handle'];
-				printf("\r 已处理的句柄数量为: %d", $count);
+				$system_usage = $this->getHumanSize(memory_get_usage(true));
+				$real_usage = $this->getHumanSize(memory_get_usage());
+				printf("\r 已处理的句柄数量为:%9d, 系统分配内存大小:%10s, 实际使用内存大小:%10s", $count, $system_usage, $real_usage);
 				$count++;
 				if ($done['result'] !== CURLE_OK) {
 					$this->onFail($doneCh, $done['result']);
@@ -127,8 +133,9 @@ class SimpleCurl
 			}
 		}
 		curl_multi_close($this->mh);
+		unset($this->ch_pool);
 		$t2 = microtime(true);
-		echo PHP_EOL, '共耗时：', $this->getHumanTime((int) round($t2-$t1,0)), "。平均每个任务耗时：", floor(((int)(round($t2-$t1,3) * 1000))/count($urls)), 'ms', PHP_EOL;
+        echo PHP_EOL, '共耗时：', $this->getHumanTime((int) round($t2-$t1,0)), "。平均每个任务耗时：", floor(((int)(round($t2-$t1,3) * 1000))/count($urls)), 'ms', PHP_EOL;
 	}
 
 	private function onFail($ch, $ch_result = NULL)
@@ -155,8 +162,12 @@ class SimpleCurl
 		}
 	}
 
-	public function getHumanTime(int $sec)
+	public function getHumanTime($sec)
 	{
+	    if (!is_int($sec)) {
+	        user_error('传入的参数为 非整数，'.$sec);
+	        exit;
+        }
 		$result = '00:00:00';
 		if ($sec>0) {
 			$hour = floor($sec/3600);
@@ -166,6 +177,18 @@ class SimpleCurl
 		}
 		return $result;
 	}
+
+
+    /**
+     * 来自 http://php.net/manual/zh/function.memory-get-usage.php 页面上一个笔记
+     * @param $size
+     * @return string
+     */
+    public function getHumanSize($size)
+    {
+        $unit=array('b','kb','mb','gb','tb','pb');
+        return @round($size/pow(1024,($i=floor(log($size,1024)))),2).' '.$unit[$i];
+    }
 
 	public function getCookieArray($content)
 	{
