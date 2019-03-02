@@ -13,10 +13,12 @@ class SimpleCurl
         CURLOPT_CONNECTTIMEOUT => 60,
         CURLOPT_TIMEOUT => 120,
     ];
+    // 在进行批处理时是否打印运行信息
+    public $display_running_info = true;
     // 最终生成的配置
     public $curl_opt_array = [];
     // 最大批处理个数
-    public $max_thread = 500;
+    public $max_thread = 100;
     // 最大重试次数
     public $max_try = 3;
     // 待处理 url 池
@@ -139,47 +141,13 @@ class SimpleCurl
         }
     }
 
-    /**
-     * 输出运行信息
-     */
-    private function displayRunningInfo()
-    {
-        $system_usage = $this->getHumanSize(memory_get_usage(true));
-        $real_usage = $this->getHumanSize(memory_get_usage());
-        // 计算平均下载速度
-        $time_used = microtime(true) - $this->running_info['time_start'];
-        $size_download = $this->running_info['size_download'];
-        if ($size_download) {
-            $speed = (int) $size_download/$time_used;
-            $speed = $this->getHumanSize($speed).'/s';
-        } else {
-            $speed = '0.0 b/s';
-        }
-        $format = "\r句柄:%9d, 分配内存:%10s, 使用内存:%10s, 平均速度:%12s";
-        $data = [
-            $format,
-            $this->running_info['ch_done_count'],
-            $system_usage,
-            $real_usage, 
-            $speed,
-        ];
-        if ($block_count = $this->running_info['block_count']) {
-            $data[0] .=  ", 阻塞%6d次";
-            $data[] = $block_count;
-        }
-        if ($retry_count = count($this->running_info['retry_info'])) {
-            $data[0] .=  ", 错误%6d个";
-            $data[] = $retry_count;
-        }
-        call_user_func_array('printf',$data);
-    }
 
     /**
      * 批处理 cUrl 连接 ，
      *
      * @param array $urls 包含需要处理的 url 的数组
      * @param callable $callable_on_success 处理成功时执行的回调函数，第一个参数为 url，第二个参数为返回的内容
-     * @param callable|NULL $callable_on_fail 处理失败时执行的回调涵涵，第一个参数为 url，第二个参数为错误信息
+     * @param callable|NULL $callable_on_fail 处理失败时执行的回调涵涵，第一个参数为 url，第二个参数为与之对应错误信息
      * @throws ErrorException
      */
     public function multi(array $urls, callable $callable_on_success, callable $callable_on_fail = NULL)
@@ -199,32 +167,35 @@ class SimpleCurl
         $this->urls_pool = $urls;
         unset($urls);
 
+        // 初始化批处理句柄
 		$this->mh = curl_multi_init();
 //		curl_multi_setopt($this->mh, CURLMOPT_MAXCONNECTS, $this->max_thread);
 //		curl_multi_setopt($this->mh, CURLMOPT_PIPELINING, 1);
 
-		// 根据 $this->max_thread 控制加入批处理的句柄数量
-		for ($i = 1; $i <= $this->max_thread; $i++) {
-		    $this->curlMultiAddHandle();
-        }
+		// 根据 $this->max_thread 和 $this->urls_pool 控制第一批加入批处理的句柄数量
+        $i = 1;
+        do {
+            $result = $this->curlMultiAddHandle();
+            $i++;
+        } while ($i <= $this->max_thread && $result);
 
-        // 下面执行两层循环的意义在于，可以在批处理过程中根据需要进行 curl_multi_add_handle 等操作
+        // 这个 do while 循环用来启动后面的 while 循环
 		$active = null;
 		do {
 			$mrc = curl_multi_exec($this->mh, $active);
-			// echo '进入第一层循环', PHP_EOL, '$mrc 的值为：', $mrc, PHP_EOL, '$active 的值为：', $active, PHP_EOL;
 		} while ($mrc == CURLM_CALL_MULTI_PERFORM);
+        // 这个 while 循环用来保证「中途」被添加进批处理的句柄可以被处理
 		while ($active && $mrc == CURLM_OK) {
 		    // 检查是否出现阻塞
 			if (curl_multi_select($this->mh, 120) == -1) {
 			    $this->running_info['block_count']++;
 				sleep(1);
 			}
-
+            // 处理处理在栈中的每一个句柄
 			do {
 				$mrc = curl_multi_exec($this->mh, $active);
 			} while ($mrc == CURLM_CALL_MULTI_PERFORM);
-			// 当检测到批处理中有某个 cUrl 句柄处理完成时，对其进行操作
+			// 当检测到批处理中有某个 cUrl 句柄处理完成时，从批处理中移除，并添加新的句柄到批处理
 			while ($done = curl_multi_info_read($this->mh)) {
 			    // 获取处理完成的句柄
 				$done_ch = $done['handle'];
@@ -234,10 +205,12 @@ class SimpleCurl
 				    $this->running_info['size_download'] += $size_download;
                 }
 				// 显示运行信息
-				$this->displayRunningInfo();
+                if ($this->display_running_info) {
+                    $this->displayRunningInfo();
+                }
 				// 判断结果是否正常
 				if ($done['result'] !== CURLE_OK || (int)curl_getinfo($done_ch, CURLINFO_HTTP_CODE) >= 400) {
-				    // 如果结果不正常（传输异常 或者 传输正常但 HTTP 状态码大于等400）
+				    // 如果结果不正常（传输异常或者传输正常但 HTTP 状态码大于等 400）
 					$this->onFail($done_ch, $done['result'], $callable_on_fail);
 				} else {
 				    // 如果结果正常 执行回调函数，添加新句柄到批处理句柄中
@@ -249,6 +222,10 @@ class SimpleCurl
 				}
 			}
 		}
+		// 打印运行信息所需的输出控制缓存在这里关闭
+        if ($this->display_running_info) {
+            ob_end_flush();
+        }
 		curl_multi_close($this->mh);
 		unset($this->ch_pool);
 		$t2 = microtime(true);
@@ -258,7 +235,9 @@ class SimpleCurl
 
 
     /**
-     * 对出现错误信息的 cUrl 句柄进行处理
+     * 对出现错误信息的 cUrl 句柄进行处理，并更新批处理中的句柄
+     * 如果没有传入处理错误信息的回调函数，错误信息会被打印出来，反之不会。
+     * 处理错误信息的回调函数会被传入 2 个参数，第一个是 url ，第二个是与之对应的错误信息
      *
      * @param $ch              resource
      * @param null $ch_result string
@@ -285,7 +264,11 @@ class SimpleCurl
 			$this->getCURLEConstants();
 			$fail_message = '';
 			if ($curl_errno) {
-			    $fail_message .= "最后一次 Curl 错误代码：".$this->curle_constants[$curl_errno]."(${curl_errno}). ";;
+                if (isset($this->curle_constants[$curl_errno])) {
+                    $fail_message .= "最后一次 Curl 错误代码：".$this->curle_constants[$curl_errno]."(${curl_errno}). ";;
+                } else {
+                    $fail_message .= "最后一次 Curl 错误代码：${curl_errno}. ";;
+                }			    
             }
 			if ($curl_error) {
 			    $fail_message .= "最后一次 Curl 错误信息：${curl_error}. ";
@@ -307,7 +290,7 @@ class SimpleCurl
 	}
 
     /**
-     *  生成新 cUrl 句柄并添加到批处理中
+     *  添加一个 cUrl 句柄到批处理中
      */
     private function curlMultiAddHandle()
     {
@@ -317,12 +300,14 @@ class SimpleCurl
             if ($result !== 0) {
                 throw new ErrorException('批处理添加句柄失败，返回代码：'.$result);
             }
+            return true;
         }
+        return false;
 	}
 
 
     /**
-     * 为批处理初始化的句柄
+     * 为批处理初始化的一个 cUrl 句柄
      *
      * @param $url  string
      * @return false|resource
@@ -373,6 +358,97 @@ class SimpleCurl
 
 
     /**
+     * 输出运行信息
+     */
+    private function displayRunningInfo()
+    {
+        // 在第一次打印运行信息后才会开启输出控制缓冲
+        if ($this->running_info['ch_done_count'] > 1) {
+           ob_end_flush();
+        }
+        // 获取系统分配内存
+        $system_usage = $this->getHumanSize(memory_get_usage(true));
+        // 获取实际使用内存
+        $real_usage = $this->getHumanSize(memory_get_usage());
+        // 计算平均下载速度
+        $time_used = microtime(true) - $this->running_info['time_start'];
+        $size_download = $this->running_info['size_download'];
+        if ($size_download) {
+            $speed = (int) $size_download/$time_used;
+            $speed = $this->getHumanSize($speed).'/s';
+        } else {
+            $speed = '0.0 b/s';
+        }
+        // 计算累计下载量
+        $size_download = $this->getHumanSize($size_download);
+        // 设置默认内容
+        $info_arr = [
+            '已处理句柄数' => $this->running_info['ch_done_count'],
+            '分配内存量'    => $system_usage,
+            '使用内存量'    => $real_usage,
+            '平均速度'      => $speed,
+            '累计下载量'    => $size_download,
+            '重试 Url 个数' => count($this->running_info['retry_info']),
+            '阻塞次数'      => $this->running_info['block_count'],
+        ];
+        // 剔除无用内容
+        foreach ($info_arr as $key => $value) {
+            if (!$value) {
+                unset($info_arr[$key]);
+            }
+        }
+        // 将标题和内容的宽度变成一样宽
+        $info_arr_new = [];
+        foreach ($info_arr as $name => $value) {
+            $value = (string) $value;
+            // 由于标题中含有中文，所以不能用 strlen 来判断宽度，strlen 会把一个汉字当做 3 个字符长度
+            // 也不能用 mb_strlen，mb_strlen 会把汉字当做 1 个字符长度，只能用 mb_strwidth 这个函数
+            $length_caption = mb_strwidth($name,'utf-8');
+            $length_content = strlen($value);
+            // 比较宽度来判断以哪个长度为标准
+            // 在用 sprintf 格式化标题行时，要用回 strlen 来生成标题行的字符长度，以便正确显示。
+            if ($length_caption > $length_content) {
+                $name = sprintf("%".strlen($name)."s", $name);
+                $value = sprintf("%".$length_caption."s", $value);
+            } else {
+                $length_caption = ($length_content - $length_caption) + strlen($name);
+                $name = sprintf("%".$length_caption."s", $name);
+                $value = sprintf("%".$length_content."s", $value);
+            }
+            $info_arr_new[$name] = $value;
+        }
+        // 以分栏符连接各个元素
+        $caption = implode(" | ", array_keys($info_arr_new));
+        $content = implode(" | ", array_values($info_arr_new));
+        // 依靠终端控制符来实现同时刷新两行内容
+        // 思路就是 光标上移\33[A->光标移至行首\r->清除光标后的内容\33[K->打印标题行->换行
+        // ->清除光标后的内容\33[K->打印内容行
+        $info = "\33[A\r\33[K".$caption.PHP_EOL."\33[K".$content;
+        // 如果是第一次出现，需要在开头添加一个换行，否则光标上移会清除上面一行
+        if ($this->running_info['ch_done_count'] === 1) {
+           $info = PHP_EOL.$info;
+        }
+        // 打印运行信息
+        echo $info;
+        // 检测缓冲区内容的开头和结尾是否有换行符，没有的话添加一个
+        ob_start( function ($content) {
+            if ($content) {
+                // 检查开头是否有换行
+                if (strpos($content,PHP_EOL) !== 0) {
+                    $content = PHP_EOL.$content;
+                }
+                // 检查结尾是否有换行
+                if (strlen($content) !== strpos($content,PHP_EOL,-1) + 1) {
+                    $content .= PHP_EOL;
+                }
+                return $content;
+            }
+        });
+    }
+
+
+
+    /**
      * 将秒数格式化
      *
      * @param $sec  integer 秒数
@@ -405,7 +481,7 @@ class SimpleCurl
     public function getHumanSize($size)
     {
         $unit=array('b','kb','mb','gb','tb','pb');
-        return @round($size/pow(1024,($i=floor(log($size,1024)))),2).' '.$unit[$i];
+        return sprintf("%0.2f", @round($size/pow(1024,($i=floor(log($size,1024)))),2)).' '.$unit[$i];
     }
 
 	public function getCookieArray($content)
