@@ -1,0 +1,22 @@
+{
+    "name": "practicemp/simple-curl",
+    "description": "A simple php curl library.",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "practicemp",
+            "homepage": "https://www.practicemp.com"
+        }
+    ],
+    "minimum-stability": "dev",
+    "require": {
+        "php": "^7.0.0",
+        "ext-curl": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "PracticeMP\\Curl\\": "src/"
+        }
+    }
+}

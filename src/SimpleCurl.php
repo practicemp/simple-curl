@@ -1,5 +1,5 @@
 <?php
-
+namespace PracticeMP\Curl;
 class SimpleCurl
 {
     public $cookie_array = [];
@@ -388,7 +388,7 @@ class SimpleCurl
             '使用内存量'    => $real_usage,
             '平均速度'      => $speed,
             '累计下载量'    => $size_download,
-            '重试 Url 个数' => count($this->running_info['retry_info']),
+            '重试的 Url 数' => count($this->running_info['retry_info']),
             '阻塞次数'      => $this->running_info['block_count'],
         ];
         // 剔除无用内容
@@ -403,17 +403,17 @@ class SimpleCurl
             $value = (string) $value;
             // 由于标题中含有中文，所以不能用 strlen 来判断宽度，strlen 会把一个汉字当做 3 个字符长度
             // 也不能用 mb_strlen，mb_strlen 会把汉字当做 1 个字符长度，只能用 mb_strwidth 这个函数
-            $length_caption = mb_strwidth($name,'utf-8');
+            $width_caption = mb_strwidth($name,'utf-8');
             $length_content = strlen($value);
             // 比较宽度来判断以哪个长度为标准
             // 在用 sprintf 格式化标题行时，要用回 strlen 来生成标题行的字符长度，以便正确显示。
-            if ($length_caption > $length_content) {
-                $name = sprintf("%".strlen($name)."s", $name);
-                $value = sprintf("%".$length_caption."s", $value);
+            if ($width_caption > $length_content) {
+                // 如果标题比内容宽
+                $value = sprintf("%".$width_caption."s", $value);
             } else {
-                $length_caption = ($length_content - $length_caption) + strlen($name);
+                // 如果内容比标题宽
+                $length_caption = ($length_content - $width_caption) + strlen($name);
                 $name = sprintf("%".$length_caption."s", $name);
-                $value = sprintf("%".$length_content."s", $value);
             }
             $info_arr_new[$name] = $value;
         }
