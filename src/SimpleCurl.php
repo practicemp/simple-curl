@@ -42,7 +42,7 @@ class SimpleCurl
 
     /**
      * SimpleCurl constructor. 检查 cUrl 版本是否符合要求
-     * @throws ErrorException
+     * @throws \ErrorException
      */
     function __construct()
     {
@@ -59,7 +59,7 @@ class SimpleCurl
             $toggle = true;
         }
         if (!$toggle) {
-            throw new ErrorException('需要 cUrl 版本大于等于 7.10.3，您的 cUrl 的版本为：'.curl_version()['version']);
+            throw new \ErrorException('需要 cUrl 版本大于等于 7.10.3，您的 cUrl 的版本为：'.curl_version()['version']);
         }
     }
 
@@ -79,7 +79,7 @@ class SimpleCurl
      * 为一个 cUrl 句柄设置选项
      *
      * @param $ch resource 一个 cUrl 句柄
-     * @throws ErrorException
+     * @throws \ErrorException
      */
     private function setOpt($ch)
     {
@@ -88,7 +88,7 @@ class SimpleCurl
         }
         $result = curl_setopt_array($ch, $this->curl_opt_array);
         if (!$result) {
-            throw new ErrorException('CURL 选项设置失败');
+            throw new \ErrorException('CURL 选项设置失败');
         }
 //        if (!empty($this->cookie_array)) {
 //          foreach ($this->cookie_array as $cookie_line) {
@@ -130,14 +130,14 @@ class SimpleCurl
      *
      * @param $ch   resource
      * @param $url  string
-     * @throws ErrorException
+     * @throws \ErrorException
      */
     private function setOptForMulti($ch, $url)
     {
         $this->setOpt($ch);
         $result = curl_setopt($ch, CURLOPT_PRIVATE, $url);
         if (!$result) {
-            throw new ErrorException('CURL 选项设置失败');
+            throw new \ErrorException('CURL 选项设置失败');
         }
     }
 
@@ -148,7 +148,7 @@ class SimpleCurl
      * @param array $urls 包含需要处理的 url 的数组
      * @param callable $callable_on_success 处理成功时执行的回调函数，第一个参数为 url，第二个参数为返回的内容
      * @param callable|NULL $callable_on_fail 处理失败时执行的回调涵涵，第一个参数为 url，第二个参数为与之对应错误信息
-     * @throws ErrorException
+     * @throws \ErrorException
      */
     public function multi(array $urls, callable $callable_on_success, callable $callable_on_fail = NULL)
 	{
@@ -242,7 +242,7 @@ class SimpleCurl
      * @param $ch              resource
      * @param null $ch_result string
      * @param callable $callable_on_fail callable
-     * @throws ErrorException
+     * @throws \ErrorException
      */
     private function onFail($ch, $ch_result = NULL, callable $callable_on_fail = NULL)
 	{
@@ -298,7 +298,7 @@ class SimpleCurl
             $url = array_shift($this->urls_pool);
             $result = curl_multi_add_handle($this->mh, $this->curlInitForMulti($url));
             if ($result !== 0) {
-                throw new ErrorException('批处理添加句柄失败，返回代码：'.$result);
+                throw new \ErrorException('批处理添加句柄失败，返回代码：'.$result);
             }
             return true;
         }
@@ -311,7 +311,7 @@ class SimpleCurl
      *
      * @param $url  string
      * @return false|resource
-     * @throws ErrorException
+     * @throws \ErrorException
      */
     private function curlInitForMulti($url)
     {
@@ -325,13 +325,13 @@ class SimpleCurl
      * 将句柄从批处理中移除，并关闭该句柄
      *
      * @param $ch  resource
-     * @throws ErrorException
+     * @throws \ErrorException
      */
     private function curlMultiRemoveHandle($ch)
     {
         $result = curl_multi_remove_handle($this->mh, $ch);
         if ($result !== 0) {
-            throw new ErrorException('批处理移除句柄失败，返回代码：'.$result);
+            throw new \ErrorException('批处理移除句柄失败，返回代码：'.$result);
         }
         curl_close($ch);
 	}
@@ -460,12 +460,17 @@ class SimpleCurl
 	        user_error('传入的参数为 非整数，'.$sec);
 	        exit;
         }
-		$result = '00 时 00 分 00 秒';
+		$result = '00时 00分 00秒';
 		if ($sec>0) {
-			$hour = floor($sec/3600);
-			$minute = floor(($sec-3600 * $hour)/60);
+			$hour = (int) floor($sec/3600);
+			$minute = (int) floor(($sec-3600 * $hour)/60);
 			$second = ($sec-3600 * $hour) - 60 * $minute;
-			$result = $hour.' 时 '.$minute.' 分 '.$second.' 秒';
+
+			$hour = sprintf('%2d', $hour);
+            $minute = sprintf('%2d', $minute);
+            $second = sprintf('%2d', $second);
+
+			$result = $hour.'时 '.$minute.'分 '.$second.'秒';
 		}
 		return $result;
 	}
