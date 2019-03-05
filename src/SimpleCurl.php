@@ -437,9 +437,12 @@ class SimpleCurl
                 if (strpos($content,PHP_EOL) !== 0) {
                     $content = PHP_EOL.$content;
                 }
-                // 检查结尾是否有换行
-                if (strlen($content) !== strpos($content,PHP_EOL,-1) + 1) {
+                // 结尾需要连续两个换行，只有一个就再追加一个,一个都没有就追加两个
+                if ( (strlen($content) === strpos($content,PHP_EOL,-1) + 1) &&
+                    (strlen($content) !== strpos($content,PHP_EOL,-2) + 2) ) {
                     $content .= PHP_EOL;
+                } else {
+                    $content .= PHP_EOL.PHP_EOL;
                 }
                 return $content;
             }
