@@ -38,6 +38,8 @@ class SimpleCurl
     ];
     // 存储 CURLE_* 错误常量数组索引，用来解释错误代码
     public $curle_constants = [];
+    // 存储错误信息
+    public $fail_message = '';
 
 
     /**
@@ -100,24 +102,32 @@ class SimpleCurl
 
     public function get($url)
     {
-        $ch = curl_init($url);
-        $this->setOpt($ch);
-        $content = curl_exec($ch);
-        // print_r(curl_getinfo($ch, CURLINFO_COOKIELIST));
-        $this->cookie_array = curl_getinfo($ch, CURLINFO_COOKIELIST);
-        curl_close($ch);
+        $content = $this->request('get',$url);
         return $content;
     }
 
     public function post($url, array $post_data)
     {
+        $content = $this->request('post',$url,$post_data);
+        return $content;
+    }
+
+    public function request($type,$url,$post_data = []) {
         $ch = curl_init($url);
         $this->setOpt($ch);
-        curl_setopt($ch, CURLOPT_POST, TRUE);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $post_data);
+        // 为 POST 方法设置选项
+        $type = strtolower($type);
+        if ($type == 'post') {
+            curl_setopt($ch, CURLOPT_POST, TRUE);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $post_data);
+        }
         $content = curl_exec($ch);
-        // print_r(curl_getinfo($ch, CURLINFO_COOKIELIST));
-        $this->cookie_array = curl_getinfo($ch, CURLINFO_COOKIELIST);
+        // 记录错误信息
+        if ($content === false) {
+            $this->fail_message = $this->getFailMessage($ch);
+        }
+//        print_r(curl_getinfo($ch, CURLINFO_COOKIELIST));
+//        $this->cookie_array = curl_getinfo($ch, CURLINFO_COOKIELIST);
         curl_close($ch);
         return $content;
     }
@@ -258,26 +268,9 @@ class SimpleCurl
 			curl_multi_add_handle($this->mh, $this->curlInitForMulti($url));
 		} else {
 		    // 不符合重试条件：抛出错误信息或执行回调函数，添加新句柄到批处理句柄中
-			$curl_errno = curl_errno($ch);
-			$curl_error = curl_error($ch);
-			$http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-			$this->getCURLEConstants();
-			$fail_message = '';
-			if ($curl_errno) {
-                if (isset($this->curle_constants[$curl_errno])) {
-                    $fail_message .= "最后一次 Curl 错误代码：".$this->curle_constants[$curl_errno]."(${curl_errno}). ";;
-                } else {
-                    $fail_message .= "最后一次 Curl 错误代码：${curl_errno}. ";;
-                }			    
-            }
-			if ($curl_error) {
-			    $fail_message .= "最后一次 Curl 错误信息：${curl_error}. ";
-            }
-			if ($ch_result) {
-			    $fail_message .= "批处理消息：".$this->curle_constants[$ch_result]."(${ch_result}). ";
-            }
-			if ($http_code) {
-			    $fail_message .= "HTTP 状态码为 $http_code";
+            $fail_message = $this->getFailMessage($ch);
+            if ($ch_result) {
+                $fail_message .= "批处理消息：".$this->curle_constants[$ch_result]."(${ch_result}). ";
             }
 			if (is_null($callable_on_fail)) {
 			    user_error($fail_message."地址为：$url");
@@ -288,6 +281,38 @@ class SimpleCurl
 			$this->curlMultiAddHandle();
 		}
 	}
+
+
+    /**
+     * 获取单个 Curl 句柄的错误信息
+     *
+     * @param $ch  resource   Curl 句柄
+     * @return string  错误信息
+     */
+    private function getFailMessage($ch) {
+        $curl_errno = curl_errno($ch);
+        $curl_error = curl_error($ch);
+        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        if (empty($this->curle_constants)) {
+            $this->getCURLEConstants();
+        }
+        $fail_message = '';
+        if ($curl_errno) {
+            if (isset($this->curle_constants[$curl_errno])) {
+                $fail_message .= "最后一次 Curl 错误代码：".$this->curle_constants[$curl_errno]."(${curl_errno}). ";;
+            } else {
+                $fail_message .= "最后一次 Curl 错误代码：${curl_errno}. ";;
+            }
+        }
+        if ($curl_error) {
+            $fail_message .= "最后一次 Curl 错误信息：${curl_error}. ";
+        }
+
+        if ($http_code) {
+            $fail_message .= "HTTP 状态码为 $http_code";
+        }
+        return $fail_message;
+    }
 
     /**
      *  添加一个 cUrl 句柄到批处理中
