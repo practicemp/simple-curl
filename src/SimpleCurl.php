@@ -21,6 +21,8 @@ class SimpleCurl
     public $max_thread = 100;
     // 最大重试次数
     public $max_try = 3;
+    // 记录单个请求的已重试次数
+    public $tried = 0;
     // 待处理 url 池
     private $urls_pool = [];
     // 批处理句柄
@@ -123,12 +125,20 @@ class SimpleCurl
         }
         $content = curl_exec($ch);
         // 记录错误信息
-        if ($content === false) {
+        if ($content === false || (int)curl_getinfo($ch, CURLINFO_HTTP_CODE) >= 400) {
+            if ($this->max_try > 0 && $this->tried <= $this->max_try) {
+                curl_close($ch);
+                return $this->request($type,$url,$post_data);
+            }
             $this->fail_message = $this->getFailMessage($ch);
+            curl_close($ch);
+            $this->tried = [];
+            return false;
         }
 //        print_r(curl_getinfo($ch, CURLINFO_COOKIELIST));
 //        $this->cookie_array = curl_getinfo($ch, CURLINFO_COOKIELIST);
         curl_close($ch);
+        $this->tried = [];
         return $content;
     }
 
