@@ -236,9 +236,14 @@ class SimpleCurl
 				    // 如果结果正常 执行回调函数，添加新句柄到批处理句柄中
 					$content = curl_multi_getcontent($done_ch);
 					$url = curl_getinfo($done_ch, CURLINFO_PRIVATE);
-					call_user_func($callable_on_success, $url, $content);
-					$this->curlMultiRemoveHandle($done_ch);
-					$this->curlMultiAddHandle();
+					$user_result = call_user_func($callable_on_success, $url, $content);
+					// 如果回调函数返回 false 说明用户需要重试该 url
+					if ($user_result === false) {
+					    $this->curlMultiRetry($done_ch,$url);
+                    } else {
+                        $this->curlMultiRemoveHandle($done_ch);
+                        $this->curlMultiAddHandle();
+                    }
 				}
 			}
 		}
@@ -274,8 +279,7 @@ class SimpleCurl
         }
 		if ($this->max_try > 0 && $this->running_info['retry_info'][$url] <= $this->max_try) {
 		    // 符合重试条件：记录重试次数并再次添加批处理句柄中
-			$this->curlMultiRemoveHandle($ch);
-			curl_multi_add_handle($this->mh, $this->curlInitForMulti($url));
+			$this->curlMultiRetry($ch,$url);
 		} else {
 		    // 不符合重试条件：抛出错误信息或执行回调函数，添加新句柄到批处理句柄中
             $fail_message = $this->getFailMessage($ch);
@@ -290,6 +294,20 @@ class SimpleCurl
 			$this->curlMultiRemoveHandle($ch);
 			$this->curlMultiAddHandle();
 		}
+	}
+
+
+    /**
+     * 在批处理过程中对特定句柄重试，记录重试次数并再次添加批处理句柄中
+     *
+     * @param $ch resource
+     * @param $url
+     * @throws \ErrorException
+     */
+    private function curlMultiRetry($ch, $url)
+    {
+        $this->curlMultiRemoveHandle($ch);
+        curl_multi_add_handle($this->mh, $this->curlInitForMulti($url));
 	}
 
 
