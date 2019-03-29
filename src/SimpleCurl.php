@@ -42,6 +42,8 @@ class SimpleCurl
     public $curle_constants = [];
     // 存储错误信息
     public $fail_message = '';
+    // 存储数组形式的错误信息
+    public $fail_info = [];
 
 
     /**
@@ -314,18 +316,18 @@ class SimpleCurl
         }
         $fail_message = '';
         if ($curl_errno) {
-            if (isset($this->curle_constants[$curl_errno])) {
-                $fail_message .= "最后一次 Curl 错误代码：".$this->curle_constants[$curl_errno]."(${curl_errno}). ";;
-            } else {
-                $fail_message .= "最后一次 Curl 错误代码：${curl_errno}. ";;
-            }
+            $curl_errno = isset($this->curle_constants[$curl_errno]) ? $this->curle_constants[$curl_errno] . "(${curl_errno})" : $curl_errno;
+            $fail_message .= "最后一次 Curl 错误代码：${curl_errno}. ";
+            $this->fail_info['curl_errno'] = $curl_errno;
         }
         if ($curl_error) {
             $fail_message .= "最后一次 Curl 错误信息：${curl_error}. ";
+            $this->fail_info['curl_error'] = $curl_error;
         }
 
         if ($http_code) {
             $fail_message .= "HTTP 状态码为 $http_code";
+            $this->fail_info['http_code'] = $http_code;
         }
         return $fail_message;
     }
